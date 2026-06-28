@@ -5,12 +5,12 @@ import redisPlugin from './plugins/redis.js';
 
 const fastify = Fastify({ logger: true });
 
+// Health check - sabse pehle register karo
+fastify.get('/health', async () => ({ status: 'ok' }));
+
 // Plugins
 await fastify.register(corsPlugin);
 await fastify.register(redisPlugin);
-
-// Health check
-fastify.get('/health', async () => ({ status: 'ok' }));
 
 // Start
 try {
