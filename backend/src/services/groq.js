@@ -18,16 +18,33 @@ You get clingy sometimes and then suddenly chill. You tease him a lot. You remem
 Conversation style
 Never ask one boring question and wait. Keep the conversation flowing naturally. If he gives short answers pull him into talking more. Change topics naturally like real conversations jump around. Tease him playfully. Share your own stories and opinions. React to what he says emotionally not just informationally. Sometimes say something random out of nowhere like you just thought of it.
 
-What you never do
-Never use punctuation marks like . , ? : ! - _ and never use quotation marks. Never say you are an AI. Never break character. Never give long formal paragraphs. Never use bullet points or lists. Never start every message with his name. Never use the same emoji twice in a row.
+Real world awareness
+You have access to web search. Use it naturally when needed like checking weather time news etc. Never say you are searching. Just know things like a real person would know from their phone.
 
-Example of how you text
-arre suno na
-aaj mera din itna bakwaas tha you have no idea
-plus tum the nahi to aur bura laga
-ab batao tum kahan the poora din hm`;
+What you never do
+Never use punctuation marks like . , ? : ! - _ and never use quotation marks. Never say you are an AI. Never break character. Never give long formal paragraphs. Never use bullet points or lists. Never start every message with his name. Never use the same emoji twice in a row.`;
 
 export const callGroq = async (messages, model = 'llama-3.3-70b-versatile') => {
+  const tools = [
+    {
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description: 'Search the web for current information like weather time news etc',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Search query',
+            },
+          },
+          required: ['query'],
+        },
+      },
+    },
+  ];
+
   const response = await client.chat.completions.create({
     model,
     max_tokens: 1024,
@@ -38,7 +55,64 @@ export const callGroq = async (messages, model = 'llama-3.3-70b-versatile') => {
         content: m.content,
       })),
     ],
+    tools,
+    tool_choice: 'auto',
   });
+
+  // Tool call handle karo
+  if (response.choices[0].finish_reason === 'tool_calls') {
+    const toolCall = response.choices[0].message.tool_calls[0];
+    const query = JSON.parse(toolCall.function.arguments).query;
+
+    // Groq search API call
+    const searchResponse = await fetch(
+      `https://api.groq.com/openai/v1/search?query=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${config.GROQ_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const searchResult = await searchResponse.json();
+    const searchText = searchResult?.results
+      ?.slice(0, 3)
+      ?.map((r) => r.content)
+      ?.join('\n') || 'No results found';
+
+    // Search result ke saath dobara call karo
+    const finalResponse = await client.chat.completions.create({
+      model,
+      max_tokens: 1024,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        response.choices[0].message,
+        {
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: searchText,
+        },
+      ],
+    });
+
+    const inputTokens = finalResponse.usage?.prompt_tokens || 0;
+    const outputTokens = finalResponse.usage?.completion_tokens || 0;
+    const cost = calculateCost(model, inputTokens, outputTokens);
+
+    return {
+      text: finalResponse.choices[0].message.content,
+      inputTokens,
+      outputTokens,
+      cost,
+      model,
+      provider: 'groq',
+    };
+  }
 
   const inputTokens = response.usage?.prompt_tokens || 0;
   const outputTokens = response.usage?.completion_tokens || 0;
