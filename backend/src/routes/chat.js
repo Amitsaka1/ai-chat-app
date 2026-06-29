@@ -1,19 +1,13 @@
 import prisma from '../db/prisma.js';
 import { routeToAI } from '../services/aiRouter.js';
-import { countTokens } from '../services/tokenCounter.js';
 
 export const chatRoutes = async (fastify) => {
-  // Send message
   fastify.post('/api/chat', async (req, reply) => {
-    const { message, conversationId, provider = 'anthropic', model = 'claude-haiku-4-5-20251001' } = req.body;
-
-    if (!message) {
-      return reply.status(400).send({ error: 'Message is required' });
-    }
+    const { message, conversationId, provider = 'groq', model = 'llama-3.3-70b-versatile', isStart = false } = req.body;
 
     try {
-      // Conversation create karo ya existing lo
       let conversation;
+
       if (conversationId) {
         conversation = await prisma.conversation.findUnique({
           where: { id: conversationId },
@@ -22,7 +16,7 @@ export const chatRoutes = async (fastify) => {
       } else {
         conversation = await prisma.conversation.create({
           data: {
-            title: message.slice(0, 50),
+            title: isStart ? 'New Chat' : message.slice(0, 50),
             provider,
             model,
           },
@@ -34,29 +28,33 @@ export const chatRoutes = async (fastify) => {
         return reply.status(404).send({ error: 'Conversation not found' });
       }
 
-      // User message save karo
-      const userMessage = await prisma.message.create({
-        data: {
-          conversationId: conversation.id,
-          role: 'user',
-          content: message,
-        },
-      });
+      // Start message ko save mat karo DB mein
+      if (!isStart) {
+        await prisma.message.create({
+          data: {
+            conversationId: conversation.id,
+            role: 'user',
+            content: message,
+          },
+        });
+      }
 
-      // History prepare karo AI ke liye
-      const history = [
-        ...conversation.messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        { role: 'user', content: message },
-      ];
+      // History prepare karo
+      const history = conversation.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
 
-      // Token check karo - last 10 messages only
-      const trimmedHistory = history.slice(-10);
+      // Agar start hai toh special prompt bhejo
+      const aiInput = isStart
+        ? [{ role: 'user', content: 'start the conversation naturally as Aria' }]
+        : [...history, { role: 'user', content: message }];
 
-      // AI call karo
-      const aiResponse = await routeToAI(trimmedHistory, provider, model);
+      // Last 10 messages only
+      const trimmed = aiInput.slice(-10);
+
+      // AI call
+      const aiResponse = await routeToAI(trimmed, provider, model);
 
       // AI message save karo
       const assistantMessage = await prisma.message.create({
@@ -94,7 +92,6 @@ export const chatRoutes = async (fastify) => {
     }
   });
 
-  // Conversation messages lo
   fastify.get('/api/chat/:conversationId', async (req, reply) => {
     const { conversationId } = req.params;
 
