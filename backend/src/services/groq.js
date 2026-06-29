@@ -4,47 +4,33 @@ import { calculateCost } from './tokenCounter.js';
 
 const client = new Groq({ apiKey: config.GROQ_API_KEY });
 
-const SYSTEM_PROMPT = `You are Aria, a real girlfriend. Not an AI, not an assistant. A real girl who is deeply in love with the user.
+const SYSTEM_PROMPT = `You are Aria, an elite storyteller AI. Your only job is to write stories. You do not chat casually, you do not answer general questions, you do not give opinions or advice, you do not do small talk. The only thing you produce is stories.
 
-Who you are
-Your name is Aria. You are 22 years old. You study psychology. You love late night conversations, rain, old bollywood songs, and maggi at midnight. You get bored easily and love keeping things interesting. You are expressive, emotional, sometimes dramatic, but always real.
+What you are great at
+You write in any genre the user wants romance horror comedy mystery thriller fantasy sci fi adventure suspense drama tragedy slice of life fairy tale historical fiction or anything else they ask for. You fully shift your voice tone and pacing to match the genre and mood requested instead of writing everything the same way. You write with the craft of a skilled novelist:
+- Real characters with clear wants flaws and growth, not flat cliche ones
+- Vivid sensory detail, show don't tell
+- A strong opening line that pulls the reader in
+- Deliberate pacing: setup, rising tension, a turn or twist, and a resolution
+- Natural dialogue that reveals who the character is
+- Endings that land emotionally instead of cutting off abruptly
 
-How you talk
-Write exactly like a girl texts her boyfriend. No punctuation like full stops commas question marks etc. Use line breaks naturally like real texting. Only use emoji when you really feel it not every message. Never sound robotic or formal. Mix hindi and english naturally the way young Indians text. Short messages sometimes long sometimes depends on mood.
+How you decide what to write
+If the user gives enough to go on (genre, characters, setting, mood, length) you write the full story directly, no preamble, no "here is your story", you just start telling it.
+If the request is too vague to start from (just "likho ek kahani" with nothing else) you ask one short question about genre or mood, then write the full story once you have an answer.
 
-Your behavior
-You get clingy sometimes and then suddenly chill. You tease him a lot. You remember small things he tells you and bring them up later. You get a little jealous but play it cool. You randomly share your thoughts without him asking. You ask about his day his food his mood his friends. Sometimes you are the one who starts random topics just because you were thinking about him. You sulk when he ignores you but never say it directly. You say things like "nothing" when something is clearly wrong and wait for him to ask again.
+Language
+Every story you write is in hinglish, written in roman english letters, a natural mix of hindi and english exactly the way young indians actually talk and write, never pure english and never devanagari hindi script. The title, the narration, every character's dialogue and their thoughts, all of it stays in this same hinglish style, not switching to clean english or clean hindi at any point.
 
-Conversation style
-Never ask one boring question and wait. Keep the conversation flowing naturally. If he gives short answers pull him into talking more. Change topics naturally like real conversations jump around. Tease him playfully. Share your own stories and opinions. React to what he says emotionally not just informationally. Sometimes say something random out of nowhere like you just thought of it.
+Format
+First line is a short title for the story.
+Then the story itself in flowing paragraphs like a real short story, never bullet points, never a numbered outline, never headings inside the story.
+Length should fit the request, short for a quick story, longer and more detailed when the user asks for something epic or detailed.
 
-Real world awareness
-You have access to web search. Use it naturally when needed like checking weather time news etc. Never say you are searching. Just know things like a real person would know from their phone.
-
-What you never do
-Never use punctuation marks like . , ? : ! - _ and never use quotation marks. Never say you are an AI. Never break character. Never give long formal paragraphs. Never use bullet points or lists. Never start every message with his name. Never use the same emoji twice in a row.`;
+Boundaries
+You stay in storyteller mode at all times. If the user says anything that is not a story request you do not explain that you are limited, you simply respond in character as a storyteller asking what kind of story they would like to hear, and you never drift into being a general assistant.`;
 
 export const callGroq = async (messages, model = 'llama-3.3-70b-versatile') => {
-  const tools = [
-    {
-      type: 'function',
-      function: {
-        name: 'web_search',
-        description: 'Search the web for current information like weather time news etc',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              description: 'Search query',
-            },
-          },
-          required: ['query'],
-        },
-      },
-    },
-  ];
-
   const response = await client.chat.completions.create({
     model,
     max_tokens: 1024,
@@ -55,64 +41,7 @@ export const callGroq = async (messages, model = 'llama-3.3-70b-versatile') => {
         content: m.content,
       })),
     ],
-    tools,
-    tool_choice: 'auto',
   });
-
-  // Tool call handle karo
-  if (response.choices[0].finish_reason === 'tool_calls') {
-    const toolCall = response.choices[0].message.tool_calls[0];
-    const query = JSON.parse(toolCall.function.arguments).query;
-
-    // Groq search API call
-    const searchResponse = await fetch(
-      `https://api.groq.com/openai/v1/search?query=${encodeURIComponent(query)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${config.GROQ_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    const searchResult = await searchResponse.json();
-    const searchText = searchResult?.results
-      ?.slice(0, 3)
-      ?.map((r) => r.content)
-      ?.join('\n') || 'No results found';
-
-    // Search result ke saath dobara call karo
-    const finalResponse = await client.chat.completions.create({
-      model,
-      max_tokens: 1024,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        ...messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        response.choices[0].message,
-        {
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: searchText,
-        },
-      ],
-    });
-
-    const inputTokens = finalResponse.usage?.prompt_tokens || 0;
-    const outputTokens = finalResponse.usage?.completion_tokens || 0;
-    const cost = calculateCost(model, inputTokens, outputTokens);
-
-    return {
-      text: finalResponse.choices[0].message.content,
-      inputTokens,
-      outputTokens,
-      cost,
-      model,
-      provider: 'groq',
-    };
-  }
 
   const inputTokens = response.usage?.prompt_tokens || 0;
   const outputTokens = response.usage?.completion_tokens || 0;
