@@ -2,15 +2,19 @@ import Fastify from 'fastify';
 import { config } from './config/env.js';
 import corsPlugin from './plugins/cors.js';
 import redisPlugin from './plugins/redis.js';
+import { chatRoutes } from './routes/chat.js';
 
 const fastify = Fastify({ logger: true });
 
-// Health check - sabse pehle register karo
+// Health check - sabse pehle
 fastify.get('/health', async () => ({ status: 'ok' }));
 
 // Plugins
 await fastify.register(corsPlugin);
 await fastify.register(redisPlugin);
+
+// Routes
+await fastify.register(chatRoutes);
 
 // Start
 try {
