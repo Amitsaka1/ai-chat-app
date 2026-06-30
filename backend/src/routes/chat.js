@@ -3,7 +3,15 @@ import { routeToAI } from '../services/aiRouter.js';
 
 export const chatRoutes = async (fastify) => {
   fastify.post('/api/chat', async (req, reply) => {
-    const { message, conversationId, provider = 'groq', model = 'llama-3.3-70b-versatile', isStart = false } = req.body;
+    const {
+      message,
+      conversationId,
+      provider = 'groq',
+      model = 'llama-3.3-70b-versatile',
+      isStart = false,
+      cardId,
+      systemPrompt,
+    } = req.body;
 
     try {
       let conversation;
@@ -16,7 +24,7 @@ export const chatRoutes = async (fastify) => {
       } else {
         conversation = await prisma.conversation.create({
           data: {
-            title: isStart ? 'New Chat' : message.slice(0, 50),
+            title: cardId || 'New Chat',
             provider,
             model,
           },
@@ -28,7 +36,6 @@ export const chatRoutes = async (fastify) => {
         return reply.status(404).send({ error: 'Conversation not found' });
       }
 
-      // Start message ko save mat karo DB mein
       if (!isStart) {
         await prisma.message.create({
           data: {
@@ -39,24 +46,19 @@ export const chatRoutes = async (fastify) => {
         });
       }
 
-      // History prepare karo
       const history = conversation.messages.map((m) => ({
         role: m.role,
         content: m.content,
       }));
 
-      // Agar start hai toh special prompt bhejo
       const aiInput = isStart
-        ? [{ role: 'user', content: 'start the conversation naturally as Aria' }]
+        ? [{ role: 'user', content: 'start the conversation naturally' }]
         : [...history, { role: 'user', content: message }];
 
-      // Last 10 messages only
       const trimmed = aiInput.slice(-10);
 
-      // AI call
-      const aiResponse = await routeToAI(trimmed, provider, model);
+      const aiResponse = await routeToAI(trimmed, systemPrompt, provider, model);
 
-      // AI message save karo
       const assistantMessage = await prisma.message.create({
         data: {
           conversationId: conversation.id,
@@ -66,7 +68,6 @@ export const chatRoutes = async (fastify) => {
         },
       });
 
-      // Token usage save karo
       await prisma.tokenUsage.create({
         data: {
           provider: aiResponse.provider,
@@ -94,17 +95,14 @@ export const chatRoutes = async (fastify) => {
 
   fastify.get('/api/chat/:conversationId', async (req, reply) => {
     const { conversationId } = req.params;
-
     try {
       const conversation = await prisma.conversation.findUnique({
         where: { id: conversationId },
         include: { messages: { orderBy: { createdAt: 'asc' } } },
       });
-
       if (!conversation) {
         return reply.status(404).send({ error: 'Conversation not found' });
       }
-
       return reply.send({ conversation });
     } catch (err) {
       fastify.log.error(err);
